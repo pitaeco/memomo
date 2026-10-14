@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>ふわふわメモ</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#ffd6e0">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link href="https://fonts.googleapis.com/css2?family=Zen+Maru+Gothic:wght@500;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #fff3e0;
+  --card: #fffdf8;
+  --pink: #ffd6e0;
+  --pink-deep: #f48fb1;
+  --ink: #6b4a55;
+  --soft: #9a7a85;
+  box-sizing: border-box;
+  padding-top: env(safe-area-inset-top, 0px);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #2b2024; --card: #3a2b30; --pink: #5a3441; --pink-deep: #f48fb1; --ink: #f6dfe5; --soft: #c9aab4;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #2b2024; --card: #3a2b30; --pink: #5a3441; --pink-deep: #f48fb1; --ink: #f6dfe5; --soft: #c9aab4;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: "Zen Maru Gothic", "Hiragino Maru Gothic ProN", "Yu Gothic", sans-serif;
+}
+main { max-width: 480px; margin: 0 auto; padding: 24px 16px 40px; }
+h1 { text-align: center; font-size: 28px; margin: 8px 0 20px; }
+.form { display: flex; gap: 8px; background: var(--pink); padding: 10px; border-radius: 24px; }
+input {
+  flex: 1; min-width: 0; border: none; border-radius: 16px;
+  padding: 12px 14px; font: inherit; font-size: 16px;
+  background: var(--card); color: var(--ink);
+}
+input:focus, button:focus-visible, select:focus-visible { outline: 3px solid var(--pink-deep); }
+#addBtn {
+  border: none; border-radius: 16px; padding: 0 18px;
+  background: var(--pink-deep); color: #fff; font: inherit; font-weight: 700; cursor: pointer;
+}
+.bar { display: flex; align-items: center; justify-content: flex-end; gap: 8px; margin-top: 16px; font-size: 14px; }
+select {
+  font: inherit; font-size: 14px; border: 2px solid var(--pink); border-radius: 14px;
+  padding: 6px 10px; background: var(--card); color: var(--ink);
+}
+ul { list-style: none; padding: 0; margin: 12px 0 0; display: grid; gap: 12px; }
+li {
+  position: relative;
+  display: flex; flex-direction: column; gap: 8px;
+  background: var(--card); border: 2px solid var(--pink);
+  border-radius: 20px; padding: 14px 14px 12px 18px;
+  word-break: break-word; line-height: 1.6;
+}
+li.pinned { border-color: var(--pink-deep); }
+li input { border: 2px solid var(--pink); }
+.dates { font-size: 12px; color: var(--soft); line-height: 1.5; }
+.actions { display: flex; justify-content: flex-end; gap: 6px; }
+.actions button {
+  border: none; background: var(--pink); color: var(--ink);
+  min-width: 36px; height: 36px; border-radius: 18px; padding: 0 10px;
+  font: inherit; font-size: 14px; cursor: pointer;
+}
+.actions button:disabled { opacity: 0.35; cursor: default; }
+.actions .on { background: var(--pink-deep); }
+.actions .ok { background: var(--pink-deep); color: #fff; font-weight: 700; }
+#empty { text-align: center; color: var(--soft); margin-top: 32px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>🌸 ふわふわメモ</h1>
+  <div class="form">
+    <input id="memoInput" type="text" placeholder="メモを書いてね" maxlength="200">
+    <button id="addBtn">追加</button>
+  </div>
+  <div class="bar">
+    <label for="sortSelect">並び順</label>
+    <select id="sortSelect">
+      <option value="new">新しい順</option>
+      <option value="updated">更新順</option>
+      <option value="old">古い順</option>
+      <option value="manual">手動（↑↓）</option>
+    </select>
+  </div>
+  <ul id="memoList"></ul>
+  <p id="empty">まだメモがありません。上の欄に書いてみてね。</p>
+</main>
+<script>
+const input = document.getElementById("memoInput");
+const addBtn = document.getElementById("addBtn");
+const list = document.getElementById("memoList");
+const empty = document.getElementById("empty");
+const sortSelect = document.getElementById("sortSelect");
+
+let memos = [];        // メモの箱。1つのメモは { id, text, created, updated, pinned }
+let sortMode = "new";  // 並び順
+let editingId = null;  // 編集中のメモのid（なければ null）
+
+function load() {
+  try {
+    const raw = JSON.parse(localStorage.getItem("memos")) || [];
+    const now = Date.now();
+    // 前のバージョン（文字だけ）のメモも、新しい形に変えて引き継ぐ
+    memos = raw.map((m, i) => typeof m === "string"
+      ? { id: "old" + i, text: m, created: now - i * 1000, updated: now - i * 1000, pinned: false }
+      : m);
+    sortMode = localStorage.getItem("memoSort") || "new";
+  } catch (e) { memos = []; }
+}
+function save() {
+  try {
+    localStorage.setItem("memos", JSON.stringify(memos));
+    localStorage.setItem("memoSort", sortMode);
+  } catch (e) {}
+}
+function formatDate(ms) {
+  return new Date(ms).toLocaleString("ja-JP", {
+    year: "numeric", month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit"
+  });
+}
+// 並び順に合わせて並べ替え。ピン留めは必ず先頭グループ
+function sorted() {
+  const a = [...memos];
+  if (sortMode === "new") a.sort((x, y) => y.created - x.created);
+  if (sortMode === "updated") a.sort((x, y) => y.updated - x.updated);
+  if (sortMode === "old") a.sort((x, y) => x.created - y.created);
+  return [...a.filter(m => m.pinned), ...a.filter(m => !m.pinned)];
+}
+function makeButton(label, name, onClick, className) {
+  const b = document.createElement("button");
+  b.textContent = label;
+  b.setAttribute("aria-label", name);
+  if (className) b.className = className;
+  b.addEventListener("click", onClick);
+  return b;
+}
+function move(items, k, step) {
+  const a = items[k], b = items[k + step];
+  if (!b || a.pinned !== b.pinned) return;
+  const i = memos.indexOf(a), j = memos.indexOf(b);
+  [memos[i], memos[j]] = [memos[j], memos[i]];
+  editingId = null;
+  save();
+  render();
+}
+function render() {
+  list.innerHTML = "";
+  const items = sorted();
+  items.forEach((m, k) => {
+    const li = document.createElement("li");
+    li.dataset.id = m.id;  // 動かすメモを見分けるための名札
+    if (m.pinned) li.className = "pinned";
+    const actions = document.createElement("div");
+    actions.className = "actions";
+
+    if (m.id === editingId) {
+      const edit = document.createElement("input");
+      edit.value = m.text;
+      edit.maxLength = 200;
+      const finish = () => {
+        const t = edit.value.trim();
+        if (t !== "" && t !== m.text) { m.text = t; m.updated = Date.now(); }
+        editingId = null;
+        save();
+        render();
+      };
+      edit.addEventListener("keydown", (e) => { if (e.key === "Enter") finish(); });
+      actions.append(
+        makeButton("やめる", "編集をやめる", () => { editingId = null; render(); }),
+        makeButton("保存", "編集を保存", finish, "ok")
+      );
+      li.append(edit, actions);
+      setTimeout(() => edit.focus(), 0);
+    } else {
+      const span = document.createElement("span");
+      span.textContent = m.text;
+      const dates = document.createElement("div");
+      dates.className = "dates";
+      dates.textContent = "作成 " + formatDate(m.created) + " ／ 更新 " + formatDate(m.updated);
+
+      actions.append(makeButton("📌", m.pinned ? "ピン留めを外す" : "ピン留め", () => {
+        m.pinned = !m.pinned;
+        save();
+        renderWithMotion(m.id);
+      }, m.pinned ? "on" : ""));
+
+      if (sortMode === "manual") {
+        const up = makeButton("↑", "上へ", () => move(items, k, -1));
+        const down = makeButton("↓", "下へ", () => move(items, k, 1));
+        up.disabled = !items[k - 1] || items[k - 1].pinned !== m.pinned;
+        down.disabled = !items[k + 1] || items[k + 1].pinned !== m.pinned;
+        actions.append(up, down);
+      }
+      actions.append(
+        makeButton("✏️", "編集", () => { editingId = m.id; render(); }),
+        makeButton("✕", "削除", () => {
+          memos = memos.filter(x => x.id !== m.id);
+          editingId = null;
+          save();
+          render();
+        })
+      );
+      li.append(span, dates, actions);
+    }
+    list.append(li);
+  });
+  empty.hidden = memos.length > 0;
+}
+// 動きをつけて描き直す：「前の位置」と「後の位置」の差から、スッと動かす
+function renderWithMotion(movedId) {
+  const before = {};
+  list.querySelectorAll("li").forEach(li => {
+    before[li.dataset.id] = li.getBoundingClientRect().top;  // 動かす前の高さ
+  });
+  render();
+  if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  list.querySelectorAll("li").forEach(li => {
+    const old = before[li.dataset.id];
+    if (old === undefined) return;
+    const diff = old - li.getBoundingClientRect().top;  // どれだけ動いたか
+    if (diff === 0) return;
+    const moved = li.dataset.id === movedId;
+    if (moved) li.style.zIndex = 2;  // ピン留めしたメモを手前に
+    const anim = li.animate(
+      [{ transform: "translateY(" + diff + "px) scale(" + (moved ? 1.04 : 1) + ")" },
+       { transform: "translateY(0) scale(1)" }],
+      { duration: 550, easing: "cubic-bezier(.2, .8, .2, 1)" }
+    );
+    anim.onfinish = () => { li.style.zIndex = ""; };
+  });
+}
+function addMemo() {
+  const text = input.value.trim();
+  if (text === "") return;
+  const now = Date.now();
+  memos.unshift({ id: String(now) + Math.random().toString(36).slice(2, 6), text: text, created: now, updated: now, pinned: false });
+  input.value = "";
+  editingId = null;
+  save();
+  render();
+}
+
+addBtn.addEventListener("click", addMemo);
+input.addEventListener("keydown", (e) => { if (e.key === "Enter") addMemo(); });
+sortSelect.addEventListener("change", () => {
+  sortMode = sortSelect.value;
+  editingId = null;
+  save();
+  render();
+});
+
+load();
+sortSelect.value = sortMode;
+render();
+
+// オフラインで使えるようにする準備
+if ("serviceWorker" in navigator) {
+  navigator.serviceWorker.register("sw.js").catch(() => {});
+}
+</script>
+</body>
+</html>
